@@ -9,8 +9,6 @@ terraform {
   }
 }
 
-# Subscription and login come from environment variables:
-# ARM_SUBSCRIPTION_ID locally, plus the OIDC variables in the pipeline
 provider "azurerm" {
   features {}
   storage_use_azuread = true
