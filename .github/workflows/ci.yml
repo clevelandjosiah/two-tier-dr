@@ -1,0 +1,33 @@
+name: CI
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  global:
+    uses: clevelandjosiah/central-pipeline/.github/workflows/terraform-pipeline.yml@main
+    with:
+      working_dir: terraform/stacks/global
+    secrets: inherit
+  primary:
+    needs: global
+    uses: clevelandjosiah/central-pipeline/.github/workflows/terraform-pipeline.yml@main
+    with:
+      working_dir: terraform/stacks/primary-eus2
+    secrets: inherit
+  dr:
+    needs: global
+    uses: clevelandjosiah/central-pipeline/.github/workflows/terraform-pipeline.yml@main
+    with:
+      working_dir: terraform/stacks/dr-cus
+    secrets: inherit
+  replication:
+    needs: [primary, dr]
+    uses: clevelandjosiah/central-pipeline/.github/workflows/terraform-pipeline.yml@main
+    with:
+      working_dir: terraform/stacks/dr-replication
+    secrets: inherit
