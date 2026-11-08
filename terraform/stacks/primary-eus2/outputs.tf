@@ -18,3 +18,11 @@ output "subnet_ids" {
 output "subnet_prefixes" {
   value = module.network.subnet_prefixes
 }
+
+output "sql_server_id" {
+  value = module.sql.server_id
+}
+
+output "sql_database_id" {
+  value = module.sql.database_id
+}

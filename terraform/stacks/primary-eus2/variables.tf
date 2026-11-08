@@ -21,3 +21,13 @@ variable "tags" {
     managed_by = "terraform"
   }
 }
+
+variable "sql_admin_login" {
+  type    = string
+  default = "clean_fg0092.online#EXT#@cleanfg0092.onmicrosoft.com"
+}
+
+variable "sql_admin_object_id" {
+  type    = string
+  default = "20994947-c5b5-4edc-8d76-226dfbdf5657"
+}
