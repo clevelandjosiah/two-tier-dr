@@ -109,6 +109,7 @@ resource "azurerm_linux_virtual_machine" "web" {
   }
 
   os_disk {
+    name                 = "osdisk-web-${var.name_suffix}-${each.key}"
     caching              = "ReadWrite"
     storage_account_type = "StandardSSD_LRS"
   }
@@ -133,4 +134,12 @@ resource "azurerm_virtual_machine_extension" "aad_login" {
   type_handler_version       = "1.0"
   auto_upgrade_minor_version = true
   tags                       = var.tags
+}
+
+# Site Recovery needs each VM's OS disk ID
+data "azurerm_managed_disk" "os" {
+  for_each            = toset(var.zones)
+  name                = "osdisk-web-${var.name_suffix}-${each.key}"
+  resource_group_name = var.resource_group_name
+  depends_on          = [azurerm_linux_virtual_machine.web]
 }

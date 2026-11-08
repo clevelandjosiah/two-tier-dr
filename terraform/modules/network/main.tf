@@ -7,6 +7,11 @@ locals {
   }
 }
 
+locals {
+  sql_destinations = var.peer_address_space == null ? [local.subnets.data] : [local.subnets.data, cidrsubnet(var.peer_address_space, 8, 3)]
+  sql_sources      = var.peer_address_space == null ? [local.subnets.app] : [local.subnets.app, cidrsubnet(var.peer_address_space, 8, 2)]
+}
+
 # ---------- VNet and subnets ----------
 
 resource "azurerm_virtual_network" "this" {
@@ -106,7 +111,7 @@ resource "azurerm_network_security_group" "app" {
     source_port_range          = "*"
     destination_port_range     = "1433"
     source_address_prefix      = local.subnets.app
-    destination_address_prefix = local.subnets.data
+    destination_address_prefix = local.sql_destinations
   }
 
   security_rule {
@@ -136,7 +141,7 @@ resource "azurerm_network_security_group" "data" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "1433"
-    source_address_prefix      = local.subnets.app
+    source_address_prefix      = local.sql_sources
     destination_address_prefix = local.subnets.data
   }
 
@@ -331,3 +336,4 @@ resource "azurerm_bastion_host" "this" {
   # The NSG must be attached before Bastion deploys
   depends_on = [azurerm_subnet_network_security_group_association.this]
 }
+

@@ -26,3 +26,9 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "peer_address_space" {
+  description = "The other region's VNet range, so SQL traffic works after a SQL-only failover"
+  type        = string
+  default     = null
+}

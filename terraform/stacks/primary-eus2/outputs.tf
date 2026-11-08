@@ -26,3 +26,7 @@ output "sql_server_id" {
 output "sql_database_id" {
   value = module.sql.database_id
 }
+
+output "vms" {
+  value = module.compute.vms
+}

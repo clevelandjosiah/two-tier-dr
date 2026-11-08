@@ -12,3 +12,13 @@ output "backend_pool_id" {
 output "vm_ids" {
   value = { for z, vm in azurerm_linux_virtual_machine.web : z => vm.id }
 }
+
+output "vms" {
+  value = {
+    for z, vm in azurerm_linux_virtual_machine.web : z => {
+      vm_id      = vm.id
+      nic_id     = azurerm_network_interface.web[z].id
+      os_disk_id = data.azurerm_managed_disk.os[z].id
+    }
+  }
+}
