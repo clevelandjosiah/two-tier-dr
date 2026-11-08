@@ -38,3 +38,22 @@ module "sql" {
   admin_object_id         = var.sql_admin_object_id
   tags                    = local.tags
 }
+
+module "compute" {
+  source              = "../../modules/compute"
+  name_suffix         = local.name_suffix
+  location            = azurerm_resource_group.this.location
+  resource_group_name = azurerm_resource_group.this.name
+  subnet_id           = module.network.subnet_ids.app
+  ssh_public_key      = file("${path.module}/../../keys/web.pub")
+  tags                = local.tags
+}
+
+module "backup" {
+  source              = "../../modules/backup"
+  name_suffix         = local.name_suffix
+  location            = azurerm_resource_group.this.location
+  resource_group_name = azurerm_resource_group.this.name
+  vm_ids              = module.compute.vm_ids
+  tags                = local.tags
+}
