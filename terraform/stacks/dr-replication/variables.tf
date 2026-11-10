@@ -21,3 +21,7 @@ variable "tags" {
     managed_by = "terraform"
   }
 }
+
+variable "alert_email" {
+  type = string
+}

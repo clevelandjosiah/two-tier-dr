@@ -30,3 +30,11 @@ output "sql_database_id" {
 output "vms" {
   value = module.compute.vms
 }
+
+output "lb_id" {
+  value = module.compute.lb_id
+}
+
+output "backup_vault_id" {
+  value = module.backup.vault_id
+}

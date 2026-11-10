@@ -22,3 +22,7 @@ output "vms" {
     }
   }
 }
+
+output "lb_id" {
+  value = azurerm_lb.web.id
+}

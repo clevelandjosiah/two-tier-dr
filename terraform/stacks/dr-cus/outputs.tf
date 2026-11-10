@@ -30,3 +30,7 @@ output "backend_pool_id" {
 output "sql_server_id" {
   value = module.sql.server_id
 }
+
+output "lb_id" {
+  value = module.compute.lb_id
+}

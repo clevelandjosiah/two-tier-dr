@@ -99,3 +99,30 @@ module "front_door" {
   secondary_origin_ip = local.dr.lb_public_ip
   tags                = var.tags
 }
+
+# ---------- Monitoring ----------
+
+data "azurerm_log_analytics_workspace" "lab" {
+  name                = "law-dr-lab"
+  resource_group_name = "rg-dr-global"
+}
+
+module "monitoring" {
+  source               = "../../modules/monitoring"
+  resource_group_name  = data.azurerm_resource_group.global.name
+  location             = data.azurerm_resource_group.global.location
+  workspace_id         = data.azurerm_log_analytics_workspace.lab.id
+  alert_email          = var.alert_email
+  frontdoor_profile_id = module.front_door.profile_id
+  primary_lb_id        = local.primary.lb_id
+  tags                 = var.tags
+
+  diagnostic_targets = {
+    frontdoor    = module.front_door.profile_id
+    lb_primary   = local.primary.lb_id
+    lb_dr        = local.dr.lb_id
+    sql_primary  = local.primary.sql_database_id
+    backup_vault = local.primary.backup_vault_id
+    asr_vault    = module.site_recovery.vault_id
+  }
+}

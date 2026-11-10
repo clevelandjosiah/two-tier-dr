@@ -5,3 +5,7 @@ output "vault_name" {
 output "recovery_plan_name" {
   value = azurerm_site_recovery_replication_recovery_plan.web.name
 }
+
+output "vault_id" {
+  value = azurerm_recovery_services_vault.asr.id
+}
