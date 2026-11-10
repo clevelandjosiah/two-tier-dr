@@ -136,7 +136,12 @@ two-tier-dr/
 └── terraform/
     ├── keys/web.pub                # Break-glass SSH public key
     ├── modules/                    # Reusable building blocks
-    │   ├── network/  compute/  sql/  backup/  site-recovery/  front-door/
+    │   ├── network/
+    │   ├── compute/
+    │   ├── sql/
+    │   ├── backup/
+    │   ├── site-recovery/
+    │   ├── front-door/
     └── stacks/                     # Deployable units, one state file each
         ├── global/                 # DNS zone, Log Analytics, Azure Policy
         ├── primary-eus2/           # East US 2
