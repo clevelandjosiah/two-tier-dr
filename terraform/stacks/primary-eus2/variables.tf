@@ -11,7 +11,7 @@ variable "address_space" {
 variable "deploy_bastion" {
   description = "Bastion bills hourly, so leave it off until you need to log in"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "tags" {

@@ -103,7 +103,7 @@ resource "azurerm_linux_virtual_machine" "web" {
     public_key = var.ssh_public_key
   }
 
-    # Required by the Entra login extension
+  # Required by the Entra login extension
   identity {
     type = "SystemAssigned"
   }
