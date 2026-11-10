@@ -143,9 +143,5 @@ two-tier-dr/
         ├── dr-cus/                 # Central US
         └── dr-replication/         # Peering, failover group, Site Recovery, Front Door
 ```
- 
-The same network, compute, and SQL modules build both regions. The DR stack changes only three inputs: no web VMs, no database, and its own address range. That keeps the DR region a true mirror of the primary.
- 
- 
-Anthony Cleveland, Cloud Engineer
+
  
