@@ -144,4 +144,18 @@ two-tier-dr/
         └── dr-replication/         # Peering, failover group, Site Recovery, Front Door
 ```
 
+
+## Design decisions
  
+| Decision | Reasoning |
+|---|---|
+| Two web VMs, not three | Keeps zone redundancy while cutting compute and replication cost |
+| Azure SQL Database, not Managed Instance | Deploys in minutes at low cost with built-in failover groups |
+| Manual SQL failover | Failover is a deliberate runbook decision, not a reaction to a brief blip |
+| cloud-init, not Ansible | Stateless web VMs need one-time setup only, with no extra runner VM or network path |
+| Front Door deployed last | It needs both regions' load balancer IPs |
+| State in Central US | Terraform must still work when the primary region is down |
+| Tag policy audit-only | Platform-created resources during failover lack custom tags, so enforcement could block recovery |
+| One state file per stack | A failed apply in one stack cannot damage another |
+ 
+---
