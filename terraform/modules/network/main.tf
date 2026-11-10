@@ -103,15 +103,15 @@ resource "azurerm_network_security_group" "app" {
   }
 
   security_rule {
-    name                       = "AllowSqlToData"
-    priority                   = 100
-    direction                  = "Outbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "1433"
-    source_address_prefix      = local.subnets.app
-    destination_address_prefix = local.sql_destinations
+    name                         = "AllowSqlToData"
+    priority                     = 100
+    direction                    = "Outbound"
+    access                       = "Allow"
+    protocol                     = "Tcp"
+    source_port_range            = "*"
+    destination_port_range       = "1433"
+    source_address_prefix        = local.subnets.app
+    destination_address_prefixes = local.sql_destinations
   }
 
   security_rule {
@@ -141,7 +141,7 @@ resource "azurerm_network_security_group" "data" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "1433"
-    source_address_prefix      = local.sql_sources
+    source_address_prefixes    = local.sql_sources
     destination_address_prefix = local.subnets.data
   }
 
