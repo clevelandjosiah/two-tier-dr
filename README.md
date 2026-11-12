@@ -1,16 +1,18 @@
 # Azure Multi-Region Disaster Recovery Lab with Terraform
 
-**Status:** 🚧 In progress: code complete and validated, global stack deployed. Regional deployment, proof tests, and the failover drill are pending.
+**Status:** ✅ Complete. Deployed, tested, and failed over from West US 3 to Central US, then torn down to stop costs.
 
 ## Video Walkthrough
 
-> 🎥 Loom walkthrough coming after the failover drill.
+> 🎥 Loom walkthrough coming soon.
 
 ## Project Overview
 
-I built a two-tier web application across two Azure regions, entirely in Terraform, to practice designing, deploying, and testing cross-region disaster recovery. East US 2 serves all traffic. Central US stays warm: its network, load balancer, and SQL server are always running, while the web VMs exist only as continuously replicated disks until a failover brings them online. Azure Front Door gives users one address and shifts traffic to whichever region is healthy.
+I built a two-tier web application across two Azure regions, entirely in Terraform, to practice designing, deploying, and testing cross-region disaster recovery. West US 3 serves all traffic. Central US stays warm: its network, load balancer, and SQL server are always running, while the web VMs exist only as continuously replicated disks until a failover brings them online. Azure Front Door gives users one address and shifts traffic to whichever region is healthy.
 
 The design changed as I built it. I started with three VMs per region, a management subnet with a self-hosted runner, and Ansible for configuration. I cut it to two VMs to reduce replication cost while keeping zone redundancy, replaced Ansible with cloud-init since stateless web VMs only need one-time setup, and removed the runner and its subnet. I also moved Front Door out of the global stack, because it needs both regions' load balancer IPs and has to deploy last.
+
+The primary region changed during deployment too. I designed the lab around East US 2, but the first apply failed: my subscription couldn't create Azure SQL servers there, and the B-series VM size was out of capacity. I checked SQL and VM availability region by region, found West US 3 and Central US were the only regions where both worked, and moved the primary to West US 3 by renaming one stack and changing two variables. That move is in step 16.
 
 How credentials are handled:
 
@@ -24,12 +26,14 @@ How credentials are handled:
 
 - **Multi-region architecture:** a warm standby region built from the same Terraform modules as the primary, with three inputs changed.
 - **Disaster recovery services:** Azure Site Recovery replication and recovery plans, a SQL failover group, and Front Door priority routing with health probes.
+- **Failover execution:** a full regional failover drill, with recovery time measured from Azure's job logs.
 - **Network security:** least-privilege NSGs that override Azure's built-in allow-all-VNet rule, Bastion with no public IPs on VMs, and SQL reachable only through private endpoints.
 - **Private DNS for PaaS:** a private DNS zone linked to both VNets, so the SQL name resolves to a private IP inside the network.
 - **Terraform at scale:** seven reusable modules, four independently deployed stacks with separate state, and cross-stack outputs through `terraform_remote_state`.
+- **Drift detection:** proved Terraform catches and reverses a manual security change.
 - **Governance:** an enforced allowed-locations policy and an audit-only tag policy, assigned at a management group.
 - **Observability:** diagnostic settings that discover each resource's log categories automatically, metric and KQL alerts, and an Action Group.
-- **State debugging:** found and fixed a stack whose state held another stack's resources before it could run a destructive plan.
+- **Troubleshooting under real constraints:** region restrictions, VM capacity, subscription limits, and Site Recovery limitations, each diagnosed and fixed in code.
 
 ## Architecture Diagram
 
@@ -37,29 +41,36 @@ How credentials are handled:
 
 ## Prerequisites
 
-- An Azure subscription where I have Owner
+- An Azure subscription where I have Owner. It must be **Pay-As-You-Go**, because Front Door is blocked on Free Trial subscriptions.
 - Azure CLI, Terraform 1.6 or later, Git, VS Code
 - macOS with zsh
 - A GitHub account (a public repo makes rulesets free)
-- At least 4 free B-series vCPUs in both East US 2 and Central US
+- At least 4 free vCPUs of the chosen VM family in both regions. Check region and size availability first:
+
+```bash
+az sql location-capability show --location westus3 --query status -o tsv
+az vm list-skus --location westus3 --size Standard_D2s_v7 --all --query "[].restrictions" -o tsv
+az vm list-usage --location westus3 --query "[?contains(name.value,'DSv7')]" -o table
+```
 
 ## Naming Conventions
 
 | Resource | Name |
 |---|---|
 | GitHub repository | `clevelandjosiah/two-tier-dr` |
-| Regions | East US 2 (`eus2`), primary. Central US (`cus`), DR. |
-| Resource groups | `rg-tfstate`, `rg-dr-global`, `rg-dr-eus2`, `rg-dr-cus` |
+| Regions | West US 3 (`wus3`), primary. Central US (`cus`), DR. |
+| Resource groups | `rg-tfstate`, `rg-dr-global`, `rg-dr-wus3`, `rg-dr-cus` |
 | State storage | `sttfstate<random>`, container `tfstate`, one key per stack |
-| VNets | `vnet-dr-eus2` (`10.10.0.0/16`), `vnet-dr-cus` (`10.20.0.0/16`) |
+| VNets | `vnet-dr-wus3` (`10.10.0.0/16`), `vnet-dr-cus` (`10.20.0.0/16`) |
 | Subnets | `AzureBastionSubnet` (`x.x.0.0/26`), `snet-app` (`x.x.2.0/24`), `snet-data` (`x.x.3.0/24`) |
 | NSGs | `nsg-app-<region>`, `nsg-data-<region>`, `nsg-bastion-<region>` |
-| Web VMs | `vm-web-eus2-1` (zone 1), `vm-web-eus2-2` (zone 2) |
-| Load balancers | `lb-dr-eus2`, `lb-dr-cus` |
+| Web VMs | `vm-web-wus3-1` (zone 1), `vm-web-wus3-2` (zone 2), size `Standard_D2s_v7` |
+| Failed-over VMs | `repl-web-zone1`, `repl-web-zone2` (named by Site Recovery) |
+| Load balancers | `lb-dr-wus3`, `lb-dr-cus` |
 | SQL | Servers `sql-dr-<region>-<random>`, database `sqldb-app`, failover group `fog-two-tier-dr-<random>` |
-| Vaults | `rsv-backup-eus2` (Azure Backup), `rsv-asr-cus` (Site Recovery) |
-| Recovery plan | `rp-web-eus2-to-cus` |
-| Front Door | Profile `afd-two-tier-dr`, endpoint `two-tier-dr` |
+| Vaults | `rsv-backup-wus3` (Azure Backup), `rsv-asr-cus` (Site Recovery) |
+| Recovery plan | `rp-web-wus3-to-cus` |
+| Front Door | Profile `afd-two-tier-dr`, endpoint `two-tier-dr`, origins `primary-wus3` and `secondary-cus` |
 | Monitoring | Workspace `law-dr-lab`, action group `ag-dr-lab` |
 | Pipeline identity | App registration `gh-two-tier-dr` |
 | Management group | `mg-dr-lab` |
@@ -129,11 +140,11 @@ cp ~/.ssh/two-tier-dr.pub terraform/keys/web.pub
 What it creates:
 
 - **Pipeline identity** `gh-two-tier-dr`, with federated credentials for `main` and for pull requests. No client secret is ever created.
-- **State storage** in its own resource group in Central US, so tearing down the lab can never delete it and Terraform still works if East US 2 is down:
+- **State storage** in its own resource group in Central US, so tearing down the lab can never delete it and Terraform still works if the primary region is down:
 
 | Setting | Value | Why |
 |---|---|---|
-| Replication | GRS | Copied to East US 2, the paired region |
+| Replication | GRS | Copied to Central US's paired region |
 | Versioning and soft delete | On, 30 days | A corrupted state file can be rolled back |
 | Lock | `CanNotDelete` | Prevents accidental deletion |
 | Access | Entra ID | No storage keys in the pipeline |
@@ -159,7 +170,7 @@ The code is split into [modules](terraform/modules/), which define what a piece 
 ```mermaid
 flowchart LR
   B["bootstrap<br/>state storage"] --> G["global"]
-  G --> P["primary-eus2"]
+  G --> P["primary-wus3"]
   G --> D["dr-cus"]
   P --> R["dr-replication"]
   D --> R
@@ -168,7 +179,7 @@ flowchart LR
 | Stack | State key | Contains |
 |---|---|---|
 | `global` | `two-tier-dr/global.tfstate` | Private DNS zone, Log Analytics, Azure Policy |
-| `primary-eus2` | `two-tier-dr/primary-eus2.tfstate` | Network, compute, SQL, backup |
+| `primary-wus3` | `two-tier-dr/primary-wus3.tfstate` | Network, compute, SQL, backup |
 | `dr-cus` | `two-tier-dr/dr-cus.tfstate` | Network, idle load balancer, SQL server |
 | `dr-replication` | `two-tier-dr/dr-replication.tfstate` | Peering, SQL failover group, Site Recovery, Front Door, monitoring |
 
@@ -180,7 +191,7 @@ terraform {
     resource_group_name  = "rg-tfstate"
     storage_account_name = "sttfstate<random>"
     container_name       = "tfstate"
-    key                  = "two-tier-dr/primary-eus2.tfstate"
+    key                  = "two-tier-dr/primary-wus3.tfstate"
     use_azuread_auth     = true
   }
 }
@@ -188,15 +199,15 @@ terraform {
 
 Separate state means a failed apply in one stack can't damage another. The trade-off is ordering: `dr-replication` reads the regional stacks' outputs, so it can't even be planned until they are applied.
 
-### 4. Global stack ✅ deployed
+### 4. Global stack
 
-[`terraform/stacks/global`](terraform/stacks/global) holds what both regions share. Its resource group lives in Central US, so none of it depends on East US 2.
+[`terraform/stacks/global`](terraform/stacks/global) holds what both regions share. Its resource group lives in Central US, so none of it depends on the primary region.
 
 | Resource | Why |
 |---|---|
 | Private DNS zone `privatelink.database.windows.net` | Both SQL private endpoints register their records here |
 | Log Analytics workspace `law-dr-lab` | Central logs that survive a primary outage |
-| Allowed locations policy, enforced | Blocks resources outside the two lab regions |
+| Allowed locations policy, enforced | Blocks resources outside `westus3` and `centralus` |
 | Required `project` tag policy, audit only | Reports untagged resources without blocking them |
 
 ```hcl
@@ -209,6 +220,10 @@ resource "azurerm_management_group_policy_assignment" "require_project_tag" {
 ```
 
 The tag policy only audits on purpose. Site Recovery and private endpoints create resources behind the scenes without my tags, so an enforced tag policy could block my own failover in the middle of an outage.
+
+When the primary moved regions, the allowed-locations policy had to change first. Otherwise my own policy would have denied every West US 3 resource.
+
+![Global stack: no changes after the region update](screenshots/04-global-apply.png)
 
 ### 5. Network module
 
@@ -244,8 +259,10 @@ Default outbound access is disabled on the private subnets, so the NAT gateway i
 
 ```hcl
 resource "azurerm_linux_virtual_machine" "web" {
-  for_each = toset(var.zones)
-  zone     = each.key
+  for_each             = toset(var.zones)
+  zone                 = each.key
+  size                 = var.vm_size # Standard_D2s_v7
+  disk_controller_type = "NVMe"      # required for v6 and newer sizes
   # ...
 }
 ```
@@ -275,12 +292,14 @@ When the app looks up the SQL name, Azure DNS redirects it to the `privatelink` 
 
 | Setting | Value | Why |
 |---|---|---|
-| Vault location | East US 2 | A backup vault must be in the same region as the VMs it protects |
-| Storage | Geo-redundant, Cross Region Restore on | Backups can be restored in Central US if East US 2 is down |
+| Vault location | West US 3 | A backup vault must be in the same region as the VMs it protects |
+| Storage | Geo-redundant, Cross Region Restore on | Backups can be restored in West US 3's paired region, East US |
 | Policy | Daily, 7-day retention, 2-day instant restore | Recent snapshots stay local for fast restores |
-| Soft delete | Off in the lab | So `terraform destroy` works. On in production. |
+| Soft delete | On, enforced by Azure | New vaults can no longer turn it off. See step 16. |
 
 Backup isn't the failover path. Site Recovery copies every disk write within minutes, which means it also copies deletions, corruption, and ransomware. Backups keep clean copies from before the damage.
+
+Cross Region Restore always targets the **paired** region, which for West US 3 is East US, not my DR region. Restoring a backup into Central US would mean restoring into East US first.
 
 ### 9. DR region stack
 
@@ -302,7 +321,7 @@ The result is a warm standby: the network, load balancer, and SQL server are rea
 |---|---|
 | VNet peering, both directions | Lets the web tier reach either region's database after a SQL-only failover |
 | SQL failover group, manual policy | Creates the secondary database, and gives the app one listener name that follows the primary |
-| [Site Recovery module](terraform/modules/site-recovery) | Vault in Central US, cache account in East US 2, zone-to-zone replication, and a recovery plan for both VMs |
+| [Site Recovery module](terraform/modules/site-recovery) | Vault in Central US, cache account in West US 3, zone-to-zone replication, and a recovery plan for both VMs |
 | [Front Door module](terraform/modules/front-door) | One public address with priority routing |
 
 ```hcl
@@ -330,43 +349,39 @@ data "azurerm_monitor_diagnostic_categories" "this" {
 }
 ```
 
-| Alert | Type | Fires when |
-|---|---|---|
-| `alert-frontdoor-primary-down` | Metric | Origin health averages below 25%, meaning the primary is down too |
-| `alert-lb-backend-unhealthy` | Metric | A primary web VM fails its health probe |
-| `alert-asr-replication-critical` | KQL | A replicated VM's health turns Critical |
+| Alert | Type | Fires when | Result |
+|---|---|---|---|
+| `alert-frontdoor-primary-down` | Metric | Origin health averages below 25% | ❌ False positive. See step 16. |
+| `alert-lb-backend-unhealthy` | Metric | A primary web VM fails its health probe | Not evaluated separately |
+| `alert-asr-replication-critical` | KQL | A replicated VM's health turns Critical | Did not fire. Replication stayed healthy. |
 
-Alerts route to the `ag-dr-lab` Action Group. Everything lives in `rg-dr-global` in Central US, so losing East US 2 doesn't take the alerting with it.
+Alerts route to the `ag-dr-lab` Action Group. Everything lives in `rg-dr-global` in Central US, so losing the primary region doesn't take the alerting with it.
 
-### 12. Pre-deployment checks ✅
+### 12. Pre-deployment checks
 
 Before spending anything, I ran every check that doesn't create resources:
 
 ```bash
 terraform fmt -check -recursive
-for s in global primary-eus2 dr-cus dr-replication; do
+for s in global primary-wus3 dr-cus dr-replication; do
   (cd stacks/$s && terraform init -input=false > /dev/null && terraform validate)
 done
 grep -rnE "sttfstateXXXXX|you@yourdomain.com|00000000-0000" stacks/ --include="*.tf"
-for s in primary-eus2 dr-cus; do
-  (cd stacks/$s && terraform plan -input=false -no-color | grep -E "^Plan:|Error")
-done
 ```
 
 | Check | Result |
 |---|---|
 | `terraform validate` | Caught two NSG attributes still using the singular `_prefix` with a list. Fixed. |
 | Placeholders | None left |
-| Global plan | No changes, confirming it's fully deployed |
-| Primary plan | **37 to add, 0 to destroy**, after fixing the state problem in step 16 |
+| Global plan | No changes, confirming it was fully deployed |
+| Primary plan | 39 to add, 0 to destroy, after fixing the state problem in step 16 |
 | DR plan | 24 to add, 0 to destroy |
-| B-series vCPU quota | 4 in each region, exactly what two B2s VMs need |
+| vCPU quota | 4 per region. Quota alone wasn't enough: the size I planned on was restricted for my subscription. See step 16. |
 
-### 13. Deploy the regions ⏳ pending
+### 13. Deploy the regions
 
 ```bash
-export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-cd terraform/stacks/primary-eus2
+cd terraform/stacks/primary-wus3
 terraform plan -out=tfplan
 terraform apply tfplan
 
@@ -379,57 +394,183 @@ terraform plan -out=tfplan
 terraform apply tfplan
 ```
 
-<!-- ![Site served from eastus2 through Front Door](screenshots/13-app-eus2.png) -->
-<!-- ![Both VMs Protected in rsv-asr-cus](screenshots/13-asr-protected.png) -->
+The replication apply took about 40 minutes. Terraform waits for each VM's initial replication to finish, which copies every disk to Central US.
 
-### 14. Prove it works ⏳ pending
+**Primary region.** Plan shows no changes after the apply, so the deployed state matches the code:
+
+![Primary stack: no changes, with outputs](screenshots/13-primary-apply.png)
+
+**DR region.** 24 resources: network, NAT gateway, idle load balancer, and SQL server:
+
+![DR stack apply](screenshots/13-dr-apply.png)
+
+**Replication layer.** Peering, failover group, Site Recovery, Front Door, and monitoring:
+
+![Replication stack apply with the Front Door URL and SQL listener](screenshots/13-dr-replication-apply.png)
+
+**The origins aren't public.** The app NSG only allows HTTP from Front Door's service tag, so hitting the load balancer directly times out:
+
+![Direct request to the load balancer timing out](screenshots/13-direct-blocked.png)
+
+From inside each VM, Nginx answers:
+
+![Both VMs serving the page internally](screenshots/13-nginx-internal.png)
+
+**Through Front Door.** The full path works: HTTPS at the edge, through the NSG, to the load balancer, to a zone-2 VM in West US 3:
+
+![Site served from westus3 through Front Door](screenshots/13-app-wus3.png)
+
+**Site Recovery.** Both VMs Protected, with healthy replication and failover health:
+
+![Both VMs Protected in rsv-asr-cus](screenshots/13-asr-protected.png)
+
+**SQL failover group.** West US 3 primary, Central US secondary, manual failover policy, one listener name:
+
+![SQL failover group configuration](screenshots/13-sql-fog.png)
+
+The database is online in West US 3 and readable in Central US, so data is replicating, not just paired:
+
+![sqldb-app Online on the primary and Readable on the secondary](screenshots/13-sql-fog-db.png)
+
+### 14. Prove it works
 
 Each test tries to break a control. Full procedures are in [the lab guide](docs/LAB-GUIDE.md#phase-12-prove-it-works).
 
 | Test | Expected | Result |
 |---|---|---|
-| Lateral movement between web VMs | Times out | Pending |
-| Same test with the deny rules deleted | Connects | Pending |
-| `terraform apply` detects and restores the deleted rules | Times out again | Pending |
-| SQL lookup from a VM | Resolves to `10.10.3.x` | Pending |
-| SQL from the internet | Denied: public network access disabled | Pending |
-| Stop one web VM | Site stays up, served by the other zone | Pending |
+| VM1 calls VM2 on port 80 | Blocked | ✅ Blocked |
+| Flip `DenyVnetInbound` to Allow outside Terraform | Connects | Still blocked. `DenyVnetOutbound` on the sender also stopped it. |
+| Flip both deny rules to Allow | Connects | ✅ Connected |
+| `terraform plan` detects the drift, `apply` reverses it | Blocked again | ✅ Detected and restored |
+| SQL lookup from a VM | Resolves to `10.10.3.x` | ✅ `10.10.3.4` through `privatelink` |
+| SQL from the internet | Denied | ✅ Public access off, SQL auth disabled |
+| Deallocate one web VM | Site stays up | ✅ 6 of 6 requests served by the other zone |
 
-<!-- ![nc timing out with deny rules in place](screenshots/14-lateral-blocked.png) -->
-<!-- ![nc succeeding with deny rules deleted](screenshots/14-lateral-open.png) -->
-<!-- ![terraform plan detecting the deleted rules](screenshots/14-terraform-drift.png) -->
-<!-- ![nslookup returning 10.10.3.x from a VM](screenshots/14-sql-private.png) -->
-<!-- ![Query editor denied from the internet](screenshots/14-sql-public-denied.png) -->
-<!-- ![Site up with one VM stopped](screenshots/14-zone-failure.png) -->
+**Lateral movement blocked.** VM1 can't reach VM2, even inside the same subnet:
 
-### 15. Failover drill ⏳ pending
+![VM1 to VM2 blocked](screenshots/14-lateral-blocked.png)
 
-1. Record the start time.
-2. Run the `rp-web-eus2-to-cus` recovery plan, choosing the latest recovery point.
-3. Fail over SQL:
-   ```bash
-   az sql failover-group set-primary --name <failover group> --resource-group rg-dr-cus --server <DR SQL server>
-   ```
-4. Refresh the Front Door URL until the page shows `centralus`, then record the end time.
-5. Fail back, then reprotect.
+**Simulated bad change.** One flipped rule wasn't enough. Lateral movement only opened after both the inbound and outbound deny rules were changed, so the design holds up against a single misconfiguration:
+
+![Both deny rules flipped and VM1 reaching VM2](screenshots/14-lateral-open.png)
+
+**Terraform catches the drift.** `plan` shows the rules being restored:
+
+![terraform plan detecting the changed rules](screenshots/14-terraform-drift.png)
+
+After `apply`, lateral movement is blocked again:
+
+![Blocked again after terraform apply](screenshots/14-drift-remediated.png)
+
+**SQL resolves privately.** From a VM, the SQL name resolves through `privatelink` to the private endpoint's IP in the data subnet:
+
+![nslookup returning 10.10.3.4 from a VM](screenshots/14-sql-private.png)
+
+**SQL refuses the internet.** The portal's query editor connects over the public endpoint and is refused. SQL authentication is also unavailable, since the server is Entra-only:
+
+![Query editor denied: public access is turned off](screenshots/14-sql-public-denied.png)
+
+**Zone failure.** With VM1 deallocated, every request is served by VM2 in zone 2. This is high availability inside the region, not disaster recovery:
+
+![Site up with one VM deallocated](screenshots/14-zone-failure.png)
+
+### 15. Failover drill
+
+I simulated losing West US 3 and recovered in order: database, then compute, then traffic.
+
+**1. Simulate the outage.** Deallocate both primary VMs. With no healthy origin, Front Door returns 504:
+
+```bash
+az vm deallocate -g rg-dr-wus3 -n vm-web-wus3-1 --no-wait
+az vm deallocate -g rg-dr-wus3 -n vm-web-wus3-2
+```
+
+![Front Door returning 504 with the primary down](screenshots/15-primary-down.png)
+
+**2. Fail over SQL.** Run against the secondary server, since a failover is always requested from the side that's becoming primary:
+
+```bash
+az sql failover-group set-primary -g rg-dr-cus -s <DR SQL server> -n <failover group>
+```
+
+The listener name doesn't change, so the app's connection string doesn't either:
+
+![Central US now Primary in the failover group](screenshots/15-sql-failover.png)
+
+**3. Fail over compute.** Run the recovery plan from West US 3 to Central US with the latest processed recovery point. I left shutdown unchecked, since a region that's down can't shut anything down gracefully:
+
+![Recovery plan failover settings](screenshots/15-asr-failover-config.png)
+
+Site Recovery checked prerequisites, failed over both VMs, booted them, and finalized the plan in 3 minutes 52 seconds:
+
+![Site Recovery failover job, all steps successful](screenshots/15-asr-failover.png)
+
+**4. Attach the recovered VMs to the DR load balancer.** Site Recovery can only attach recovered VMs to an internal load balancer, and Front Door needs a public one, so this step is manual:
+
+```bash
+for nic in $(az network nic list -g rg-dr-cus --query "[?virtualMachine!=null].name" -o tsv); do
+  ipc=$(az network nic show -g rg-dr-cus -n $nic --query "ipConfigurations[0].name" -o tsv)
+  az network nic ip-config address-pool add -g rg-dr-cus --nic-name $nic \
+    --ip-config-name $ipc --lb-name lb-dr-cus --address-pool web
+done
+```
+
+**5. Correct the page label.** cloud-init wrote the region into the page as fixed text when the VMs were built, so the recovered VMs still claimed `westus3`. I rewrote it from the Instance Metadata Service, which reports the real region. The permanent fix is in step 16.
+
+**6. Verify.** Same URL, now served from Central US:
+
+![Site served from centralus after failover](screenshots/15-app-cus.png)
+
+Front Door's origin request count shows traffic before the outage, nothing during it, and traffic again after recovery:
+
+![Origin request count across the drill](screenshots/15-frontdoor-traffic.png)
 
 | Measure | Target | Result |
 |---|---|---|
-| Web tier RTO | 30 minutes | Pending |
-| Web tier RPO | 5 minutes | Pending |
-| SQL failover time | 15 minutes | Pending |
+| Outage detected (Front Door 504) | n/a | 3:06 PM |
+| SQL failover | 15 minutes | About 1 minute |
+| Compute failover (Site Recovery job) | 30 minutes | 3 minutes 52 seconds |
+| End-to-end, outage to site restored | 30 minutes | About 31 minutes, including manual steps |
+| Web tier RPO | 5 minutes | Not measured. Used the latest processed recovery point. |
 
-<!-- ![Site served from centralus after failover](screenshots/15-app-cus.png) -->
-<!-- ![Front Door health probe log showing the switch](screenshots/15-frontdoor-probes.png) -->
+The 31 minutes is honest drill time, not automation time. Most of it was me working through manual steps: the SQL command, the portal, and the load balancer attachment. Automating step 4 inside the recovery plan would remove most of the gap.
+
+**Alerting.** The Front Door alert fired, but at 12:13 PM, almost three hours before the outage. It was a false positive, covered in step 16:
+
+![Alert fired at 12:13 PM, before any outage](screenshots/15-alert-false-positive.png)
+
+<!-- TODO: add once Outlook is back up -->
+<!-- ![Alert email from ag-dr-lab](screenshots/15-alert-email.png) -->
+> 📧 *Screenshot pending: the `ag-dr-lab` email for `alert-frontdoor-primary-down`. It shows the same 12:13 PM fire time, so it's part of the false-positive finding.*
+
+I skipped failback. Reprotecting Central US back to West US 3 means another full replication cycle, and the lab was being destroyed right after.
 
 ### 16. Break and fix: what went wrong while building
 
+**Before deployment**
+
 1. **The storage account wouldn't create.** The bootstrap script failed with `SubscriptionNotFound`, even though the subscription was listed, enabled, and my default. The real cause was that the `Microsoft.Storage` resource provider wasn't registered. Registering it fixed the script, and I registered every provider the lab needs up front.
 2. **GitHub secrets returned a 404.** `gh secret set` failed with `failed to fetch public key: HTTP 404` because the repository didn't exist on GitHub yet. Creating the repo first fixed it.
-3. **One stack's state held another stack's resources.** This was the most important catch. The global stack's `backend.tf` was copied from the primary's, so the first global apply wrote into the **primary's** state file. When I corrected the key, `terraform init -migrate-state` copied the state to the new key but left the original behind. The primary plan then showed `2 to destroy` on a stack that had never been deployed. `terraform state show` confirmed the primary state held `rg-dr-global`, and applying would have destroyed the global resource group and DNS zone. I removed both entries with `terraform state rm`, which only edits Terraform's records, and the plan dropped to 0 to destroy while global still showed no changes.
+3. **One stack's state held another stack's resources.** The global stack's `backend.tf` was copied from the primary's, so the first global apply wrote into the **primary's** state file. When I corrected the key, `terraform init -migrate-state` copied the state to the new key but left the original behind. The primary plan then showed `2 to destroy` on a stack that had never been deployed. `terraform state show` confirmed the primary state held `rg-dr-global`, and applying would have destroyed the global resource group and DNS zone. I removed both entries with `terraform state rm`, which only edits Terraform's records, and the plan dropped to 0 to destroy while global still showed no changes.
 4. **Validate caught a type error.** When I added cross-region SQL rules, I passed a list to `destination_address_prefix` and `source_address_prefix`, which only take a single string. The plural forms fixed it.
 5. **The SSH key didn't exist.** `file()` failed on `keys/web.pub` because the key had never been generated on this machine.
 6. **A stack referenced a missing module.** Adding the backup module failed with `Reference to undeclared module` because the stack had no `module "compute"` block to read `vm_ids` from.
+
+**During deployment**
+
+7. **East US 2 couldn't host the lab.** The first primary apply failed twice: `SkuNotAvailable` for `Standard_B2s`, and `ProvisioningDisabled` for Azure SQL. I checked SQL capability across seven regions, and only Central US and West US 3 allowed SQL servers. I destroyed the partial deployment, updated the allowed-locations policy, renamed the stack to `primary-wus3`, and changed `eastus2` to `westus3` throughout the code. Central US stayed the DR region, so the DR stack didn't change at all.
+8. **Quota isn't the same as availability.** I had 4 B-series vCPUs of quota in both regions, but `az vm list-skus` showed `Standard_B2s` as `NotAvailableForSubscription` in both. I listed sizes with no restrictions in both regions and chose `Standard_D2s_v7`. Sizes from v6 onward need `disk_controller_type = "NVMe"`.
+9. **A missing output broke the workflow.** `lb_public_ip` wasn't in the regional stacks' outputs, which Front Door reads through remote state. I added it to both and ran `terraform apply -refresh-only` to write it to state without changing resources.
+10. **A hidden prompt held the state lock.** I piped `terraform plan` through `grep`, which hid an input prompt, so the plan hung while holding the state lock. The next plan failed with `state blob is already locked`. I released it with `terraform force-unlock` and stopped filtering plan output.
+11. **Azure no longer lets you turn off soft delete.** Creating the Site Recovery vault failed: `soft_delete_enabled cannot be false`. Azure made soft delete mandatory on new Recovery Services vaults. I set it to `true`, and the provider now marks the argument as deprecated.
+12. **Front Door is blocked on Free Trial.** `Free Trial and Student account is forbidden for Azure Frontdoor resources`. I upgraded the subscription to Pay-As-You-Go. The alternative was Traffic Manager, which would have meant exposing the origins to the internet.
+13. **Site Recovery fabrics collided.** Terraform created both fabrics at once, and the API rejected the second with a misleading `resource already exists`. A listing showed only one fabric existed. Adding `depends_on` so they create one at a time fixed it.
+14. **Site Recovery can't use a public load balancer.** Enabling replication failed with `The public load balancer 'lb-dr-cus' being used is unsupported`. Site Recovery only attaches recovered VMs to internal load balancers. I removed the setting and made it a post-failover step. In production, an Azure Automation runbook inside the recovery plan would do it automatically.
+
+**During testing**
+
+15. **The failover alert was broken from the start.** `alert-frontdoor-primary-down` fired at 12:13 PM, three hours before the outage. The metric it watched, origin health percentage, averaged under 2% even while both VMs were healthy, so a `< 25%` threshold was always true. An alert that's always firing teaches people to ignore it. The fix is to alert on Front Door's origin request count or 5xx rate instead, and to test every alert by triggering it on purpose before trusting it.
+16. **Recovered VMs reported the wrong region.** cloud-init wrote the page using a Terraform variable, so after failover the Central US VMs still said `westus3`. The page is now corrected from the Instance Metadata Service, and the permanent fix is for cloud-init to read the region from it at boot. Site Recovery also names recovered VMs after their replicated items (`repl-web-zone1`), while the hostname inside the disk stays `vm-web-wus3-1`.
 
 ## Verification Checklist
 
@@ -439,16 +580,18 @@ Each test tries to break a control. Full procedures are in [the lab guide](docs/
 - [x] Management group exists, and the pipeline has Resource Policy Contributor on it
 - [x] Global stack deployed: DNS zone, Log Analytics, and both policy assignments
 - [x] `terraform validate` passes for all four stacks
-- [x] Primary and DR plans show 0 to destroy
-- [x] B-series quota confirmed in both regions
-- [ ] Primary and DR regions deployed
-- [ ] Both VMs show Protected in Site Recovery
-- [ ] Site reachable through Front Door from `eastus2`
-- [ ] Lateral movement blocked, and drift restored by Terraform
-- [ ] SQL reachable only through the private endpoint
-- [ ] Site survives one stopped VM
-- [ ] Regional failover completed, with RTO and RPO measured
+- [x] Primary and DR regions deployed
+- [x] Both VMs show Protected in Site Recovery
+- [x] Site reachable through Front Door from `westus3`
+- [x] Origins unreachable directly from the internet
+- [x] Lateral movement blocked, and drift restored by Terraform
+- [x] SQL reachable only through the private endpoint
+- [x] Site survives one deallocated VM
+- [x] Regional failover completed, with RTO measured
+- [ ] Web tier RPO measured
 - [ ] Failback completed
+- [ ] Front Door alert redesigned and tested
+- [ ] Load balancer attachment automated in the recovery plan
 - [ ] CI pipeline authenticates to Azure and runs a plan
 
 ## Troubleshooting
@@ -465,23 +608,36 @@ Each test tries to break a control. Full procedures are in [the lab guide](docs/
 | `no file exists at "./../../keys/web.pub"` | SSH key never generated on this machine | Generated the key pair and copied the public key into the repo |
 | `Reference to undeclared module` | Stack referenced `module.compute`, but the block was missing | Added the `module "compute"` block |
 | `terraform init` returned 403 on my laptop | Only the pipeline had data access to the state account | Granted myself Storage Blob Data Contributor |
-| Editor underlined code in red, but `terraform validate` passed | The editor hadn't loaded the provider schema | Ran `terraform init` in that folder and reloaded the editor |
-| `terraform plan` in dr-replication failed with `Unsupported attribute` | The regional stacks weren't applied, so their outputs didn't exist | Expected. It plans after both regions are deployed. |
-| `grep "^Plan:"` matched nothing | Terraform's color codes came before `Plan:` on the line | Added `-no-color` |
-| `git push` rejected with `fetch first` | The remote had a commit missing locally | `git pull --rebase`, then push |
-| A commit only included one folder | `git add .` ran inside a stack folder | Ran Git commands from the repo root |
-| Architecture diagram missing on GitHub | Image saved in the repo root instead of `docs/architecture/` | Moved it to the path the README references |
+| `SkuNotAvailable` for `Standard_B2s` | Size restricted for the subscription in that region | Listed unrestricted sizes in both regions and switched to `Standard_D2s_v7` |
+| SQL server create failed with `ProvisioningDisabled` | Region closed to new SQL servers for the subscription | Checked `az sql location-capability show` per region and moved the primary to West US 3 |
+| `git mv` failed with `bad source` | Ran from inside `terraform/`, then hit an untracked lock file | Ran from the repo root and removed `.terraform.lock.hcl` before moving |
+| `Output "lb_public_ip" not found` | Output missing from the stack | Added it and ran `terraform apply -refresh-only` |
+| `curl` to the load balancer hung | NSG only allows HTTP from Front Door | Expected. Tested from inside the VMs with `az vm run-command`. |
+| `stat tfplan: no such file or directory` | The plan failed, and `grep` hid the error | Ran the plan without filtering |
+| `state blob is already locked` | An earlier plan was stuck on a hidden prompt | `terraform force-unlock <lock id>` |
+| `soft_delete_enabled cannot be false` | Azure now enforces soft delete on new vaults | Set `soft_delete_enabled = true` |
+| `Free Trial and Student account is forbidden for Azure Frontdoor resources` | Subscription type | Upgraded to Pay-As-You-Go |
+| `The resource already exists` on the second ASR fabric | Both fabrics created in parallel | `depends_on` between the fabrics |
+| `The public load balancer 'lb-dr-cus' being used is unsupported` | Site Recovery only supports internal load balancers | Removed the setting and attached the VMs after failover |
+| `FailoverGroupFailoverRequestOnPrimary` | The role changed while the request was in flight | Checked the partner's role. Failover had already completed. |
+| `ResourceNotFound` for `vm-web-wus3-1` in `rg-dr-cus` | Site Recovery names recovered VMs after the replicated items | Listed VMs in Central US and used `repl-web-zone1` and `repl-web-zone2` |
+| Origin health metric near 0% while healthy | The metric reads very low at this traffic level | Used origin request count to show the failover |
 
 ## Cleanup
 
-After each lab session, destroy the stacks in reverse order. Only destroy from a failed-back state, since VMs created by Site Recovery aren't in Terraform's state and would block deleting the DR resource group.
+Site Recovery and the failover group create resources Terraform doesn't track: the recovered VMs, their disks and NICs, and the database copy in Central US. These block a normal `terraform destroy` of the DR stack, so after a failover without failback I tore down in this order:
 
 ```bash
 cd terraform/stacks/dr-replication && terraform destroy
-cd ../dr-cus && terraform destroy
-cd ../primary-eus2 && terraform destroy
+
+az group delete -n rg-dr-cus --yes
+cd ../dr-cus && terraform state list | xargs -n1 terraform state rm
+
+cd ../primary-wus3 && terraform destroy
 cd ../global && terraform destroy
 ```
+
+Deleting `rg-dr-cus` directly removes everything in it, tracked or not. Clearing that stack's state afterward keeps Terraform from looking for resources that no longer exist.
 
 To remove everything permanently, including the one-time setup:
 
@@ -502,13 +658,18 @@ The lock has to be removed before the state account can be deleted. Deleting the
 ## Key Takeaways
 
 - **High availability and disaster recovery are different layers.** Zones survive a datacenter failure. Only a second region survives a regional one.
+- **Check the region before writing the code.** Quota, VM size availability, and service availability are three different checks, and my original primary region failed two of them.
+- **Modules made the region move cheap.** Moving the primary meant renaming one stack and changing a few values, because nothing region-specific lived in the modules.
 - **Site Recovery copies mistakes.** It replicates corruption and ransomware within minutes, which is why backups are a separate layer and not the failover path.
 - **Front Door only moves traffic.** RTO depends on how fast the replicas and the database fail over, not on routing.
+- **Every manual step in a recovery plan costs minutes.** Site Recovery's own job took under 4 minutes. Most of the 31-minute drill was me.
+- **An alert you haven't triggered is an assumption.** Mine fired constantly and would never have signaled the real outage.
+- **Defense in depth works even inside one NSG.** Opening lateral movement took two bad changes, not one.
 - **Governance can block recovery.** An enforced tag policy would deny the untagged resources Site Recovery creates during a failover.
 - **State needs disaster recovery too.** If state lived in the primary region, Terraform would be locked out exactly when it's needed most.
 - **Read every plan before applying.** A plan that destroys resources on a stack that was never deployed is a warning, not a formality.
 - **`-migrate-state` copies, it doesn't move.** The old state stays behind, still claiming the resources.
-- **Error messages can point the wrong way.** `SubscriptionNotFound` was really an unregistered resource provider.
+- **Error messages can point the wrong way.** `SubscriptionNotFound` was really an unregistered resource provider, and `resource already exists` was really a race condition.
 - **A PaaS database never lives in your network.** A private endpoint brings a private doorway to it instead.
 
 ---
