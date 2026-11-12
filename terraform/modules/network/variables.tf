@@ -1,5 +1,5 @@
 variable "name_suffix" {
-  description = "Short region name used in resource names, like eus2 or cus"
+  description = "Short region name used in resource names, like wus3 or cus"
   type        = string
 }
 

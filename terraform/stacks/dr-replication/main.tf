@@ -6,7 +6,7 @@ data "terraform_remote_state" "primary" {
     resource_group_name  = "rg-tfstate"
     storage_account_name = var.state_storage_account
     container_name       = "tfstate"
-    key                  = "two-tier-dr/primary-eus2.tfstate"
+    key                  = "two-tier-dr/primary-wus3.tfstate"
     use_azuread_auth     = true
   }
 }
@@ -30,7 +30,7 @@ locals {
 # ---------- VNet peering, needed in both directions ----------
 
 resource "azurerm_virtual_network_peering" "primary_to_dr" {
-  name                         = "peer-eus2-to-cus"
+  name                         = "peer-wus3-to-cus"
   resource_group_name          = local.primary.resource_group_name
   virtual_network_name         = local.primary.vnet_name
   remote_virtual_network_id    = local.dr.vnet_id
@@ -38,7 +38,7 @@ resource "azurerm_virtual_network_peering" "primary_to_dr" {
 }
 
 resource "azurerm_virtual_network_peering" "dr_to_primary" {
-  name                         = "peer-cus-to-eus2"
+  name                         = "peer-cus-to-wus3"
   resource_group_name          = local.dr.resource_group_name
   virtual_network_name         = local.dr.vnet_name
   remote_virtual_network_id    = local.primary.vnet_id

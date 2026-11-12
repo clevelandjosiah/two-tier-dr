@@ -5,7 +5,7 @@ resource "azurerm_recovery_services_vault" "asr" {
   location            = var.location
   resource_group_name = var.resource_group_name
   sku                 = "Standard"
-  soft_delete_enabled = false # lab teardown; true in production
+  soft_delete_enabled = true # lab teardown; true in production
   tags                = var.tags
 }
 
@@ -32,7 +32,7 @@ resource "azurerm_storage_account" "cache" {
 # ---------- Fabrics and containers: ASR's model of each region ----------
 
 resource "azurerm_site_recovery_fabric" "source" {
-  name                = "fabric-eus2"
+  name                = "fabric-wus3"
   resource_group_name = var.resource_group_name
   recovery_vault_name = azurerm_recovery_services_vault.asr.name
   location            = var.source_location
@@ -43,10 +43,12 @@ resource "azurerm_site_recovery_fabric" "target" {
   resource_group_name = var.resource_group_name
   recovery_vault_name = azurerm_recovery_services_vault.asr.name
   location            = var.location
+  
+    depends_on = [azurerm_site_recovery_fabric.source]
 }
 
 resource "azurerm_site_recovery_protection_container" "source" {
-  name                 = "container-eus2"
+  name                 = "container-wus3"
   resource_group_name  = var.resource_group_name
   recovery_vault_name  = azurerm_recovery_services_vault.asr.name
   recovery_fabric_name = azurerm_site_recovery_fabric.source.name
@@ -70,7 +72,7 @@ resource "azurerm_site_recovery_replication_policy" "this" {
 }
 
 resource "azurerm_site_recovery_protection_container_mapping" "this" {
-  name                                      = "map-eus2-to-cus"
+  name                                      = "map-wus3-to-cus"
   resource_group_name                       = var.resource_group_name
   recovery_vault_name                       = azurerm_recovery_services_vault.asr.name
   recovery_fabric_name                      = azurerm_site_recovery_fabric.source.name
@@ -80,7 +82,7 @@ resource "azurerm_site_recovery_protection_container_mapping" "this" {
 }
 
 resource "azurerm_site_recovery_network_mapping" "this" {
-  name                        = "netmap-eus2-to-cus"
+  name                        = "netmap-wus3-to-cus"
   resource_group_name         = var.resource_group_name
   recovery_vault_name         = azurerm_recovery_services_vault.asr.name
   source_recovery_fabric_name = azurerm_site_recovery_fabric.source.name
@@ -117,7 +119,6 @@ resource "azurerm_site_recovery_replicated_vm" "web" {
   network_interface {
     source_network_interface_id                     = each.value.nic_id
     target_subnet_name                              = var.target_subnet_name
-    recovery_load_balancer_backend_address_pool_ids = [var.target_backend_pool_id]
   }
 
   depends_on = [
@@ -129,7 +130,7 @@ resource "azurerm_site_recovery_replicated_vm" "web" {
 # ---------- Recovery plan: fail over all web VMs in one action ----------
 
 resource "azurerm_site_recovery_replication_recovery_plan" "web" {
-  name                      = "rp-web-eus2-to-cus"
+  name                      = "rp-web-wus3-to-cus"
   recovery_vault_id         = azurerm_recovery_services_vault.asr.id
   source_recovery_fabric_id = azurerm_site_recovery_fabric.source.id
   target_recovery_fabric_id = azurerm_site_recovery_fabric.target.id

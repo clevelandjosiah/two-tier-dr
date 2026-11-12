@@ -3,7 +3,7 @@ variable "resource_group_name" {
 }
 
 variable "primary_origin_ip" {
-  description = "East US 2 load balancer IP"
+  description = "West US 3 load balancer IP"
   type        = string
 }
 

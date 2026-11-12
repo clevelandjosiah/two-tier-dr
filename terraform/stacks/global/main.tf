@@ -31,12 +31,12 @@ data "azurerm_management_group" "lab" {
 # Blocks any resource outside the two lab regions
 resource "azurerm_management_group_policy_assignment" "allowed_locations" {
   name                 = "allowed-locations"
-  display_name         = "Allowed locations: East US 2 and Central US"
+  display_name         = "Allowed locations: West US 3 and Central US"
   management_group_id  = data.azurerm_management_group.lab.id
   policy_definition_id = "/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c"
 
   parameters = jsonencode({
-    listOfAllowedLocations = { value = ["eastus2", "centralus"] }
+    listOfAllowedLocations = { value = ["westus3", "centralus"] }
   })
 }
 

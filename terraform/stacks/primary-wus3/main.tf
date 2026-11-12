@@ -1,5 +1,5 @@
 locals {
-  name_suffix = "eus2"
+  name_suffix = "wus3"
   tags        = merge(var.tags, { region_role = "primary" })
 }
 

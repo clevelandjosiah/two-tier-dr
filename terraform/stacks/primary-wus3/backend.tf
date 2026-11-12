@@ -3,7 +3,7 @@ terraform {
     resource_group_name  = "rg-tfstate"
     storage_account_name = "sttfstate19323"
     container_name       = "tfstate"
-    key                  = "two-tier-dr/primary-eus2.tfstate"
+    key                  = "two-tier-dr/primary-wus3.tfstate"
     use_azuread_auth     = true # Entra ID login, no storage keys
   }
 }

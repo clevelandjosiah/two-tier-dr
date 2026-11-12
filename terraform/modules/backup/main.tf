@@ -4,7 +4,7 @@ resource "azurerm_recovery_services_vault" "this" {
   resource_group_name          = var.resource_group_name
   sku                          = "Standard"
   storage_mode_type            = "GeoRedundant" # copies backups to Central US
-  cross_region_restore_enabled = true           # lets you restore there if East US 2 is down
+  cross_region_restore_enabled = true           # lets you restore there if West US 3 is down
   soft_delete_enabled          = var.soft_delete_enabled
   tags                         = var.tags
 }

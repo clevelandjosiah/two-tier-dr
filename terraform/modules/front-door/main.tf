@@ -33,7 +33,7 @@ resource "azurerm_cdn_frontdoor_origin_group" "web" {
 }
 
 resource "azurerm_cdn_frontdoor_origin" "primary" {
-  name                           = "primary-eus2"
+  name                           = "primary-wus3"
   cdn_frontdoor_origin_group_id  = azurerm_cdn_frontdoor_origin_group.web.id
   enabled                        = true
   host_name                      = var.primary_origin_ip

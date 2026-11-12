@@ -76,7 +76,7 @@ resource "azurerm_monitor_metric_alert" "lb_backend_unhealthy" {
   name                = "alert-lb-backend-unhealthy"
   resource_group_name = var.resource_group_name
   scopes              = [var.primary_lb_id]
-  description         = "A web VM in East US 2 is failing the load balancer health probe."
+  description         = "A web VM in West US 3 is failing the load balancer health probe."
   severity            = 2
   frequency           = "PT1M"
   window_size         = "PT5M"

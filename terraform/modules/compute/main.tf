@@ -92,6 +92,7 @@ resource "azurerm_linux_virtual_machine" "web" {
   resource_group_name             = var.resource_group_name
   zone                            = each.key
   size                            = var.vm_size
+  disk_controller_type            = "NVMe"
   admin_username                  = var.admin_username
   disable_password_authentication = true
   network_interface_ids           = [azurerm_network_interface.web[each.key].id]

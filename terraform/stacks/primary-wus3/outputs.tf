@@ -38,3 +38,6 @@ output "lb_id" {
 output "backup_vault_id" {
   value = module.backup.vault_id
 }
+output "lb_public_ip" {
+  value = module.compute.lb_public_ip
+}

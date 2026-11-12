@@ -4,3 +4,4 @@
 *.tfvars
 crash.log
 !*.tfvars.example
+tfplan

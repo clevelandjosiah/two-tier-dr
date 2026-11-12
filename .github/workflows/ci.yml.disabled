@@ -17,7 +17,7 @@ jobs:
     needs: global
     uses: clevelandjosiah/central-pipeline/.github/workflows/terraform-pipeline.yml@main
     with:
-      working_dir: terraform/stacks/primary-eus2
+      working_dir: terraform/stacks/primary-wus3
     secrets: inherit
   dr:
     needs: global

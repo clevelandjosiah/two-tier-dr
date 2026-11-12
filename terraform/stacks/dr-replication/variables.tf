@@ -6,7 +6,7 @@ variable "state_storage_account" {
 
 variable "primary_location" {
   type    = string
-  default = "eastus2"
+  default = "westus3"
 }
 
 variable "dr_location" {

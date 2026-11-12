@@ -1,6 +1,6 @@
 variable "location" {
   type    = string
-  default = "eastus2"
+  default = "westus3"
 }
 
 variable "address_space" {
